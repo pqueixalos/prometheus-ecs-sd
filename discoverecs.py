@@ -162,10 +162,13 @@ class TaskInfoDiscoverer:
 
     def add_task_definitions(self, task_infos):
         def fetcher(arn):
+            #return self.ecs_client.describe_task_definition(taskDefinition=arn)['taskDefinition']
+            # Get TAGS ------------- #
             temp = self.ecs_client.describe_task_definition(taskDefinition=arn, include=['TAGS'])
             taskDefinition = temp['taskDefinition']
             taskDefinition['tags'] = temp['tags']
             return taskDefinition
+            # Get TAGS ------------- #
 
         for task_info in task_infos:
             arn = task_info.task['taskDefinitionArn']
@@ -240,7 +243,10 @@ class Target:
 
     def __init__(self, ip, port, metrics_path,
                  p_instance, ecs_task_id, ecs_task_name, ecs_task_version,
+                 #ecs_container_id, ecs_cluster_name, ec2_instance_id):
+                 # Get TAGS ------------- #
                  ecs_container_id, ecs_cluster_name, ec2_instance_id, tags):
+                 # Get TAGS ------------- #
         self.ip = ip
         self.port = port
         self.metrics_path = metrics_path
@@ -251,7 +257,9 @@ class Target:
         self.ecs_container_id = ecs_container_id
         self.ecs_cluster_name = ecs_cluster_name
         self.ec2_instance_id = ec2_instance_id
+        # Get TAGS ------------- #
         self.tags = tags
+        # Get TAGS ------------- #
 
 def get_environment_var(environment, name):
     for entry in environment:
@@ -282,6 +290,7 @@ def extract_path_interval(env_variable):
     return path_interval
 
 def task_info_to_targets(task_info):
+    targets = []
     if not task_info.valid():
         return []
     for container_definition in task_info.task_definition['containerDefinitions']:
@@ -290,14 +299,15 @@ def task_info_to_targets(task_info):
         nolabels = get_environment_var(container_definition['environment'], 'PROMETHEUS_NOLABELS')
         prom_port = get_environment_var(container_definition['environment'], 'PROMETHEUS_PORT')
         prom_container_port = get_environment_var(container_definition['environment'], 'PROMETHEUS_CONTAINER_PORT')
+        # Get TAGS ------------- #
         tags = task_info.task_definition['tags']
+        # Get TAGS ------------- #
         if nolabels != 'true': nolabels = None
         containers = filter(lambda c:c['name'] == container_definition['name'], task_info.task['containers'])
         if prometheus:
             for container in containers:
                 ecs_task_name=extract_name(task_info.task['taskDefinitionArn'])
                 has_host_port_mapping = 'portMappings' in container_definition and len(container_definition['portMappings']) > 0
-
                 if prom_port:
                     first_port = prom_port
                 elif task_info.task_definition.get('networkMode') in ('host', 'awsvpc'):
@@ -334,7 +344,7 @@ def task_info_to_targets(task_info):
                         ec2_instance_id=task_info.container_instance['ec2InstanceId']
                         ecs_container_id=extract_name(container['containerArn'])
 
-                return [Target(
+                targets += [Target(
                     ip=interface_ip,
                     port=first_port,
                     metrics_path=metrics_path,
@@ -344,9 +354,12 @@ def task_info_to_targets(task_info):
                     ecs_task_version=ecs_task_version,
                     ecs_container_id=ecs_container_id,
                     ecs_cluster_name=ecs_cluster_name,
+                    #ec2_instance_id=ec2_instance_id)]
+                    # Get TAGS ------------- #
                     ec2_instance_id=ec2_instance_id,
                     tags=tags)]
-    return []
+                    # Get TAGS ------------- #
+    return targets
 
 class Main:
 
@@ -357,7 +370,7 @@ class Main:
 
     def write_jobs(self, jobs):
         for i, j in jobs.items():
-            file_name = self.directory + '/' + i + '-tasks.json'
+            file_name = self.directory + '/' + i + '-tasks-' + os.environ.get('AWS_PROFILE') + '.json'
             tmp_file_name = file_name + '.tmp'
             with open(tmp_file_name, 'w') as f:
                 f.write(json.dumps(j, indent=4))
@@ -402,9 +415,10 @@ class Main:
                         'metrics_path' : path
                     }
                 }
+                # Get TAGS ------------- #
                 for tag in target.tags:
                     labels[tag['key']] = tag['value']
-                
+                # Get TAGS ------------- #
                 if labels:
                     job['labels'].update(labels)
                 jobs[interval].append(job)
